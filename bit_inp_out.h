@@ -5,11 +5,12 @@
 #include <stdint.h>
 
 typedef struct {
-    FILE *file;              
-    unsigned char buffer;    // буфер для накопления битов
-    int bit_pos;            // позиция бита в буфере
+    FILE *file;
+    uint8_t write_buffer[4096];
+    size_t buffer_pos;
+    uint8_t current_byte;
+    int bit_pos;
 } BitWriter_t;
-
 
 typedef struct {
     FILE *file;

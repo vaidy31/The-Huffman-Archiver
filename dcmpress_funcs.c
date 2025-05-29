@@ -11,26 +11,36 @@
 
 void bit_writer_init(BitWriter_t *obj, FILE *file) {
     obj->file = file;
-    obj->buffer = 0;
+    obj->buffer_pos = 0;
+    obj->current_byte = 0; // текущий байт для записи
     obj->bit_pos = 7;
 }
 
 void bit_writer_write(BitWriter_t *obj, int bit) {
     if (bit) { // если биь 1, то записываем в буфер его
-        obj->buffer |= (1 << obj->bit_pos);
+        obj->current_byte |= (1 << obj->bit_pos);
     }
     obj->bit_pos--; // next 
     // буфер заполнен, значит сбрасываем его, но сначала записываем в файл
     if (obj->bit_pos < 0) {
-        fputc(obj->buffer, obj->file);
-        obj->buffer = 0;
+        obj->write_buffer[obj->buffer_pos++] = obj->current_byte; // записываем текущий байт в буфер
+        obj->current_byte = 0;
         obj->bit_pos = 7;
+
+        if (obj->buffer_pos == 4096) { // если буфер заполнен
+            fwrite(obj->write_buffer, 1, 4096, obj->file);
+            obj->buffer_pos = 0;
+        }
     }
 }
 
 void bit_writer_flush(BitWriter_t *obj) {
     if (obj->bit_pos != 7) { // если в буфере остались не записанные биты
-        fputc(obj->buffer, obj->file);
+        obj->write_buffer[obj->buffer_pos++] = obj->current_byte;
+    }
+    if (obj->buffer_pos > 0) {
+        fwrite(obj->write_buffer, 1, obj->buffer_pos, obj->file);
+        obj->buffer_pos = 0;
     }
 }
 
