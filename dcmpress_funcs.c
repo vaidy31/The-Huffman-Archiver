@@ -68,20 +68,20 @@ int bitreader_read_bit(BitReader_t *br) {
 
 
 
-void compress_file_n_write(FILE *archive, const char *input, ArchiveEntry_t *entry) {
+int compress_file_n_write(FILE *archive, const char *input, ArchiveEntry_t *entry) {
     printf("Compressing %s ---> archive file\n", input);
 
     FileReader_t *reader = file_reader_init(input);
     if (!reader) {
         printf("Error: Problem with open input file %s\n", input);
-        return;
+        return 0;
     }
     
     FILE *input_fp = fopen(input, "rb");
     if (!input_fp) {
         printf("Error: Cannot open file %s to get size\n", input);
         file_reader_free(reader);
-        return;
+        return 0;
     }
     
     long file_size = get_file_size_from_fp(input_fp);
@@ -90,7 +90,7 @@ void compress_file_n_write(FILE *archive, const char *input, ArchiveEntry_t *ent
     if (file_size <= 0) {
         printf("Error: Cannot get file size for %s\n", input);
         file_reader_free(reader);
-        return;
+        return 0;
     }
 
     size_t process = 0;
@@ -110,7 +110,7 @@ void compress_file_n_write(FILE *archive, const char *input, ArchiveEntry_t *ent
     if (!tree_root) {
         printf("Error: Cannot build Huffman tree\n");
         file_reader_free(reader);
-        return;
+        return 0;
     }
 
     HuffmanCode_t table[256] = {0};
@@ -158,6 +158,7 @@ void compress_file_n_write(FILE *archive, const char *input, ArchiveEntry_t *ent
     free_huffman_tree(tree_root);
     
     printf("Compression completed successfully!\n");
+    return 1;
 }
 
 void compress_files(char **input_files, int file_count, const char *archive_name) {
@@ -178,7 +179,13 @@ void compress_files(char **input_files, int file_count, const char *archive_name
     // сжимаем каждый файл
     for (int i = 0; i < file_count; i++) {
         printf("[%d/%d] %s\n", i + 1, file_count, input_files[i]);
-        compress_file_n_write(archive, input_files[i], &entries[i]);
+        int res = compress_file_n_write(archive, input_files[i], &entries[i]);
+        if (!res){
+            printf("Error occurred during compression. Aborting.\n");
+            free(entries);
+            fclose(archive);
+            return;
+        }
     }
 
     // Записываем таблицу файлов
@@ -242,13 +249,15 @@ void decompress_archive(const char *archive_name) {
         perror("fopen archive");
         return;
     }
-
+    int flag = 1;
     int file_count;
     if (fread(&file_count, sizeof(int), 1, in) != 1) {
         printf("Error: Cannot read file count from archive\n");
         fclose(in);
         return;
     }
+
+
     
     printf("Archive contains %d file(s)\n", file_count);
     
@@ -257,7 +266,6 @@ void decompress_archive(const char *archive_name) {
         fclose(in);
         return;
     }
-    
     // чтение мета-данных
     ArchiveEntry_t *entries = calloc(file_count, sizeof(ArchiveEntry_t));
     if (!entries) {
@@ -282,6 +290,12 @@ void decompress_archive(const char *archive_name) {
         size_t original_size;
         if (fread(&original_size, sizeof(size_t), 1, in) != 1) {
             printf("Error: Cannot read original size for %s\n", entry->filename);
+            flag = 0;
+            continue;
+        }
+        if (original_size == 0 || original_size > 1024 * 1024 * 512) { // предел в 512 мб, что убрать ошибку при архивации повержденного архива
+            printf("Error: Invalid original size (%zu) for %s\n", original_size, entry->filename);
+            flag = 0;
             continue;
         }
         
@@ -289,6 +303,16 @@ void decompress_archive(const char *archive_name) {
         uint32_t freq[256] = {0};
         if (fread(freq, sizeof(uint32_t), 256, in) != 256) {
             printf("Error: Cannot read frequency table for %s\n", entry->filename);
+            flag = 0;
+            continue;
+        }
+        int freq_sum = 0; // проверка таблица частот
+        for (int i = 0; i < 256; ++i) {
+            freq_sum += freq[i];
+        }
+        if (freq_sum == 0) {
+            printf("Error: Corrupted frequency table for %s (all zero)\n", entry->filename);
+            flag = 0;
             continue;
         }
         
@@ -296,6 +320,7 @@ void decompress_archive(const char *archive_name) {
         HuffmanNode_t *tree = generate_huffman_tree(freq);
         if (!tree) {
             printf("Error: Cannot build Huffman tree for %s\n", entry->filename);
+            flag = 0;
             continue;
         }
 
@@ -319,7 +344,11 @@ void decompress_archive(const char *archive_name) {
 
     free(entries);
     fclose(in);
-    printf("Archive extraction completed.\n");
+    if (flag) {
+        printf("Archive extraction completed successfully.\n");
+    } else {
+        printf("Archive extraction completed with errors.\n");
+    }
 }
 
 void print_progress_bar(size_t curr, size_t total) {
