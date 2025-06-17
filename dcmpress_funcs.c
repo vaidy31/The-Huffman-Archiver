@@ -17,11 +17,11 @@ void bit_writer_init(BitWriter_t *obj, FILE *file) {
 }
 
 void bit_writer_write(BitWriter_t *obj, int bit) {
-    if (bit) { // если биь 1, то записываем в буфер его
+    if (bit) { // если бит 1, то записываем в буфер
         obj->current_byte |= (1 << obj->bit_pos);
     }
     obj->bit_pos--; // next 
-    // буфер заполнен, значит сбрасываем его, но сначала записываем в файл
+    // если считали 8 бит
     if (obj->bit_pos < 0) {
         obj->write_buffer[obj->buffer_pos++] = obj->current_byte; // записываем текущий байт в буфер
         obj->current_byte = 0;
@@ -35,10 +35,12 @@ void bit_writer_write(BitWriter_t *obj, int bit) {
 }
 
 void bit_writer_flush(BitWriter_t *obj) {
-    if (obj->bit_pos != 7) { // если в буфере остались не записанные биты
-        obj->write_buffer[obj->buffer_pos++] = obj->current_byte;
+    if (obj->bit_pos != 7) { // если в cuurent_byte есть незаписанные биты
+        obj->write_buffer[obj->buffer_pos++] = obj->current_byte; // записываем в буфер
+        obj->current_byte = 0;
+        obj->bit_pos = 7;
     }
-    if (obj->buffer_pos > 0) {
+    if (obj->buffer_pos > 0) { // записываем буфер в файл 
         fwrite(obj->write_buffer, 1, obj->buffer_pos, obj->file);
         obj->buffer_pos = 0;
     }
@@ -46,26 +48,32 @@ void bit_writer_flush(BitWriter_t *obj) {
 
 void bitreader_init(BitReader_t *br, FILE *file) {
     br->file = file;
-    br->buffer = 0;
     br->bits_left = 0;
+    br->buffer_pos = 0;
+    br->buffer_size = 0;
 }
 
 int bitreader_read_bit(BitReader_t *br) {
-    if (br->bits_left == 0) { // читаем новый байт если буфер все
-        if (feof(br->file)) return -1;
-        if (fread(&br->buffer, 1, 1, br->file) != 1){
-            return -1;
+    if (br->bits_left == 0) {
+        if (br->buffer_pos >= br->buffer_size) {
+            // Читаем новый блок
+            br->buffer_size = fread(br->buffer, 1, 4096, br->file);
+            br->buffer_pos = 0;
+            if (br->buffer_size == 0) return -1; // Конец файла
         }
+        br->current_byte = br->buffer[br->buffer_pos++];
         br->bits_left = 8;
     }
-    // двигаем буфер
-    int bit = (br->buffer >> 7) & 1;
-    br->buffer <<= 1;
+    int bit = (br->current_byte >> 7) & 1;
+    br->current_byte <<= 1;
     br->bits_left--;
     return bit;
 }
 
-
+int is_archive_file(const char *filename) {
+    const char *ext = strrchr(filename, '.');
+    return ext && (strcmp(ext, ".huf") == 0);
+}
 
 
 int compress_file_n_write(FILE *archive, const char *input, ArchiveEntry_t *entry) {
@@ -169,6 +177,19 @@ void compress_files(char **input_files, int file_count, const char *archive_name
         return;
     }
 
+    int real_file_count = 0;
+    for (int i = 0; i < file_count; i++) {
+        if (!is_archive_file(input_files[i])) {
+            real_file_count++;
+        }
+    }
+
+    if (real_file_count == 0) {
+        printf("No files to archive (all files are archives or have archive extensions)\n");
+        fclose(archive);
+        return;
+    }
+
     // записываем заголовок архива
     fwrite(&file_count, sizeof(int), 1, archive); // кол-во файлов
     long header_pos = ftell(archive);
@@ -178,6 +199,11 @@ void compress_files(char **input_files, int file_count, const char *archive_name
 
     // сжимаем каждый файл
     for (int i = 0; i < file_count; i++) {
+        if (is_archive_file(input_files[i])) {
+            printf("Skipping archive file: %s\n", input_files[i]);
+            continue;
+        }
+
         printf("[%d/%d] %s\n", i + 1, file_count, input_files[i]);
         int res = compress_file_n_write(archive, input_files[i], &entries[i]);
         if (!res){
@@ -201,7 +227,6 @@ void compress_files(char **input_files, int file_count, const char *archive_name
 
 void decompress_file(BitReader_t *br, HuffmanNode_t *root, FILE *out, size_t original_size) {
     printf("Decompressing file...\n");
-    
     if (!root) {
         printf("Error: Huffman tree is empty\n");
         return;

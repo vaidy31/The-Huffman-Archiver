@@ -14,8 +14,11 @@ typedef struct {
 
 typedef struct {
     FILE *file;
-    uint8_t buffer;         // буфер для чтения битов (255)
-    int bits_left;          
+    uint8_t buffer[4096]; 
+    size_t buffer_pos;    
+    size_t buffer_size;   
+    uint8_t current_byte;  
+    int bits_left;         
 } BitReader_t;
 
 

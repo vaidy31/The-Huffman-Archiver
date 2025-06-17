@@ -33,7 +33,7 @@ int main(int argc, char *argv[]) {
         print_help(argv[0]);
         return 0;
     }
-    if (strcmp(argv[1], "--compress") == 0) {
+    if (strcmp(argv[1], "--compress") == 0 || (strcmp(argv[1], "--c") == 0)) {
         if (argc < 4) {
             fprintf(stderr, "Ошибка: для сжатия необходимо указать имя архива и хотя бы один файл.\n");
             print_usage_error(argv[0]);
@@ -45,7 +45,7 @@ int main(int argc, char *argv[]) {
         return 0;
     }
     
-    if (strcmp(argv[1], "--decompress") == 0) {
+    if (strcmp(argv[1], "--decompress") == 0 || (strcmp(argv[1], "--d") == 0)) {
         if (argc != 3) {
             fprintf(stderr, "Ошибка: для распаковки необходимо указать только имя архива.\n");
             print_usage_error(argv[0]);
